@@ -1,0 +1,8 @@
+/index.html
+  Cache-Control: no-cache, must-revalidate
+  Pragma: no-cache
+  Expires: 0
+/game.js
+  Cache-Control: no-cache, must-revalidate
+  Pragma: no-cache
+  Expires: 0

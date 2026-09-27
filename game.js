@@ -104,13 +104,14 @@ const SFX = {
     src.connect(f).connect(g).connect(this.ctx.destination);
     src.start(t); src.stop(t + dur + 0.02);
   },
-  whoosh(delay = 0) { this.noise(0.55, 2400, 0.09, delay, 250); },
+  whoosh(delay = 0) { this.noise(0.55, 2400, 0.1, delay, 250); },
   boom() {
-    this.tone(75, 26, 0.5, 'sine', 0.45);
-    this.noise(0.5, 800, 0.35, 0.02, 150);
-    this.noise(0.3, 2800, 0.14, 0.12);
-    this.noise(0.25, 3800, 0.1, 0.24);
-    this.noise(0.2, 4800, 0.07, 0.36);
+    this.tone(90, 30, 0.5, 'sine', 0.5);
+    this.tone(220, 60, 0.18, 'triangle', 0.28);
+    this.noise(0.5, 1200, 0.4, 0.02, 200);
+    this.noise(0.35, 3200, 0.18, 0.1);
+    this.noise(0.3, 4200, 0.13, 0.22);
+    this.noise(0.25, 5500, 0.1, 0.34);
   },
   jump() { const d = rand(0.95, 1.05); this.tone(300 * d, 620 * d, 0.13, 'triangle', 0.11); },
   spring() { this.tone(180, 980, 0.28, 'triangle', 0.15); },
@@ -435,14 +436,14 @@ const Fireworks = {
   },
   burst(r) {
     this.rings.push({ x: r.x, y: r.y, age: 0, life: 0.55, color: r.color });
-    this.flash = { age: 0, life: 0.22, color: r.color };
-    Game.shake = Math.max(Game.shake, 0.6);
+    this.flash = { age: 0, life: 0.28, color: '#fff' };
+    Game.shake = Math.max(Game.shake, 0.85);
     SFX.boom();
-    const n = 46 + ((Math.random() * 24) | 0);
+    const n = 70 + ((Math.random() * 40) | 0);
     for (let i = 0; i < n; i++) {
       const a = (i / n) * Math.PI * 2 + rand(-0.06, 0.06);
-      const v = rand(110, 340);
-      this.addSpark(r.x, r.y, Math.cos(a) * v, Math.sin(a) * v, rand(0.8, 1.6), rand(2, 4.5), choice(FW_COLORS));
+      const v = rand(150, 480);
+      this.addSpark(r.x, r.y, Math.cos(a) * v, Math.sin(a) * v, rand(0.9, 1.8), rand(2, 5), choice(FW_COLORS));
     }
   },
   update(dt) {
@@ -484,7 +485,7 @@ const Fireworks = {
   draw() {
     ctx.save();
     if (this.flash) {
-      ctx.globalAlpha = (1 - this.flash.age / this.flash.life) * 0.2;
+      ctx.globalAlpha = (1 - this.flash.age / this.flash.life) * 0.35;
       ctx.fillStyle = this.flash.color;
       ctx.fillRect(0, 0, CFG.W, CFG.H);
     }
