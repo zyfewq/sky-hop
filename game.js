@@ -397,6 +397,87 @@ const Items = {
   draw() { for (const it of this.list) it.draw(); },
 };
 
+/* ---------------- fireworks (100-point celebration) ---------------- */
+const FW_COLORS = ['#ff6b6b', '#ffd166', '#6fc7ff', '#8ee08e', '#c792ea', '#ff9ee5', '#ffffff'];
+const Fireworks = {
+  rockets: [], sparks: [], rings: [],
+  reset() { this.rockets.length = 0; this.sparks.length = 0; this.rings.length = 0; },
+  launch(n = 1) {
+    for (let i = 0; i < n; i++) {
+      if (this.rockets.length >= 5) break;
+      const startY = CFG.H + 12;
+      const targetY = rand(CFG.H * 0.12, CFG.H * 0.42);
+      this.rockets.push({
+        x: rand(CFG.W * 0.15, CFG.W * 0.85),
+        y: startY,
+        vy: -Math.sqrt(2 * 300 * (startY - targetY)) * rand(1.02, 1.1),
+        targetY,
+        color: choice(FW_COLORS),
+      });
+    }
+  },
+  addSpark(x, y, vx, vy, life, size, color) {
+    if (this.sparks.length >= 220) this.sparks.shift();
+    this.sparks.push({ x, y, vx, vy, age: 0, life, size, color, tw: rand(0, 6) });
+  },
+  burst(r) {
+    this.rings.push({ x: r.x, y: r.y, age: 0, life: 0.35, color: r.color });
+    const n = 26 + ((Math.random() * 14) | 0);
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2 + rand(-0.08, 0.08);
+      const v = rand(70, 200);
+      this.addSpark(r.x, r.y, Math.cos(a) * v, Math.sin(a) * v, rand(0.6, 1.15), rand(1.5, 3.2), choice(FW_COLORS));
+    }
+  },
+  update(dt) {
+    for (let i = this.rockets.length - 1; i >= 0; i--) {
+      const r = this.rockets[i];
+      r.vy += 300 * dt;
+      r.y += r.vy * dt;
+      if (Math.random() < 0.8) this.addSpark(r.x + rand(-2, 2), r.y + 4, rand(-15, 15), rand(20, 60), 0.3, 1.5, '#ffd9a0');
+      if (r.y <= r.targetY) { this.burst(r); this.rockets.splice(i, 1); }
+    }
+    for (let i = this.sparks.length - 1; i >= 0; i--) {
+      const s = this.sparks[i];
+      s.age += dt;
+      if (s.age >= s.life) { this.sparks.splice(i, 1); continue; }
+      s.vy += 240 * dt;
+      const d = Math.exp(-1.8 * dt);
+      s.vx *= d; s.vy *= d;
+      s.x += s.vx * dt; s.y += s.vy * dt;
+    }
+    for (let i = this.rings.length - 1; i >= 0; i--) {
+      const rg = this.rings[i];
+      rg.age += dt;
+      if (rg.age >= rg.life) this.rings.splice(i, 1);
+    }
+  },
+  draw() {
+    ctx.save();
+    for (const rg of this.rings) {
+      const f = rg.age / rg.life;
+      ctx.globalAlpha = (1 - f) * 0.8;
+      ctx.strokeStyle = rg.color; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(rg.x, rg.y, 6 + f * 30, 0, 7); ctx.stroke();
+    }
+    for (const r of this.rockets) {
+      ctx.globalAlpha = 0.35;
+      ctx.fillStyle = r.color;
+      ctx.beginPath(); ctx.arc(r.x, r.y, 6, 0, 7); ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.beginPath(); ctx.arc(r.x, r.y, 2.5, 0, 7); ctx.fill();
+    }
+    for (const s of this.sparks) {
+      const f = 1 - s.age / s.life;
+      ctx.globalAlpha = Math.max(0, f * (0.55 + 0.45 * Math.sin(s.age * 22 + s.tw)));
+      ctx.fillStyle = s.color;
+      ctx.beginPath(); ctx.arc(s.x, s.y, s.size * (0.5 + f * 0.5), 0, 7); ctx.fill();
+    }
+    ctx.restore();
+    ctx.globalAlpha = 1;
+  },
+};
+
 /* ---------------- background (parallax sky) ---------------- */
 const SKY = {
   top: [[105, 183, 255], [74, 95, 174], [20, 16, 50]],
@@ -730,14 +811,19 @@ const Score = {
   meters: 0, points: 0, best: 0, startY: 0, newBest: false,
   load() { try { this.best = +localStorage.getItem('skyhop.best') || 0; } catch (e) { this.best = 0; } },
   save() { try { localStorage.setItem('skyhop.best', String(this.best)); } catch (e) { } },
-  reset(py) { this.meters = 0; this.points = 0; this.newBest = false; this.startY = py; },
+  lastMilestone: 0,
+  reset(py) { this.meters = 0; this.points = 0; this.newBest = false; this.lastMilestone = 0; this.startY = py; },
   update(py) {
     const real = Math.max(0, (this.startY - py) / CFG.pxPerM);
     if (real > this.meters) {
-      const crossed = Math.floor(real / 100) > Math.floor(this.meters / 100);
       this.points += (real - this.meters) * (FX.x2 > 0 ? 2 : 1);
       this.meters = real;
-      if (crossed && this.meters >= 100) SFX.milestone();
+    }
+    const m100 = Math.floor(this.points / 100);
+    if (m100 > this.lastMilestone) {
+      this.lastMilestone = m100;
+      SFX.milestone();
+      Fireworks.launch(1);
     }
     if (Math.floor(this.points) > this.best) { this.best = Math.floor(this.points); this.newBest = true; }
   },
@@ -902,6 +988,7 @@ const Game = {
     Score.reset(this.player.y);
     FX.clear();
     Items.reset();
+    Fireworks.reset();
     this.shake = 0;
     this.paused = false;
     UI.btn = null;
@@ -932,6 +1019,7 @@ const Game = {
     if (this.shake > 0) this.shake = Math.max(0, this.shake - dt * 2);
     BG.update(dt);
     Particles.update(dt);
+    Fireworks.update(dt);
     const p = this.player;
     if (this.state === 'playing') {
       FX.tick(dt);
@@ -1002,6 +1090,7 @@ const Game = {
     this.player.draw();
     ctx.restore();
     Particles.draw(Camera.y);
+    Fireworks.draw();
     UI.hud();
     if (this.state === 'menu') UI.menu(this.time);
     else if (this.state === 'dead') UI.dead();
@@ -1046,4 +1135,5 @@ if (typeof globalThis !== 'undefined') {
   globalThis.__PLATFORM__ = Platform;
   globalThis.__PTYPES__ = PTYPES;
   globalThis.__MUSIC__ = Music;
+  globalThis.__FIREWORKS__ = Fireworks;
 }
