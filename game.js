@@ -44,11 +44,21 @@ const ctx = canvas.getContext('2d');
 let viewScale = 1, viewOX = 0, viewOY = 0;
 function resize() {
   const dpr = Math.min(2, window.devicePixelRatio || 1);
+  // adaptive logical height: fill tall (phone portrait) screens, keep 720 on desktop-ish ratios
+  const winRatio = Math.max(0.2, window.innerWidth / Math.max(1, window.innerHeight));
+  const newH = Math.round(clamp(CFG.W / winRatio, 720, 1200) / 16) * 16;
+  if (newH !== CFG.H) {
+    CFG.H = newH;
+    if (BG.genH && Math.abs(CFG.H - BG.genH) > 40) BG.reset();
+  }
   const s = Math.min(window.innerWidth / CFG.W, window.innerHeight / CFG.H) * 0.98;
+  const w = Math.max(1, Math.round(CFG.W * s * dpr));
+  const h = Math.max(1, Math.round(CFG.H * s * dpr));
+  if (canvas.width === w && canvas.height === h && canvas.style.width === (CFG.W * s) + 'px') return;
   canvas.style.width = (CFG.W * s) + 'px';
   canvas.style.height = (CFG.H * s) + 'px';
-  canvas.width = Math.max(1, Math.round(CFG.W * s * dpr));
-  canvas.height = Math.max(1, Math.round(CFG.H * s * dpr));
+  canvas.width = w;
+  canvas.height = h;
   viewScale = s * dpr;
   viewOX = (canvas.width - CFG.W * viewScale) / 2;
   viewOY = (canvas.height - CFG.H * viewScale) / 2;
@@ -322,8 +332,9 @@ function drawCloud(x, y, s, a) {
   ctx.restore();
 }
 const BG = {
-  stars: [], clouds: [],
+  stars: [], clouds: [], genH: 0,
   reset() {
+    this.genH = CFG.H;
     this.stars = [];
     for (let i = 0; i < 70; i++) this.stars.push({ x: rand(CFG.W), y: rand(CFG.H * 2), s: rand(0.6, 1.8), tw: rand(0, 6.28), sp: rand(0.5, 1.6) });
     this.clouds = [];
@@ -696,11 +707,12 @@ const UI = {
     ctx.restore();
   },
   menu(t) {
+    const H = CFG.H;
     ctx.save();
     ctx.fillStyle = 'rgba(10,16,34,.3)';
-    ctx.fillRect(0, 0, CFG.W, CFG.H);
+    ctx.fillRect(0, 0, CFG.W, H);
     ctx.textAlign = 'center';
-    ctx.translate(CFG.W / 2, 185 + Math.sin(t * 2.2) * 7);
+    ctx.translate(CFG.W / 2, H * 0.26 + Math.sin(t * 2.2) * 7);
     this.setFont(58, 800);
     ctx.fillStyle = 'rgba(0,0,0,.3)';
     ctx.fillText('SKY HOP', 3, 4);
@@ -711,21 +723,21 @@ const UI = {
     ctx.textAlign = 'center';
     this.setFont(16, 600);
     ctx.fillStyle = 'rgba(255,255,255,.85)';
-    ctx.fillText('hop forever · climb the sky', CFG.W / 2, 232);
+    ctx.fillText('hop forever · climb the sky', CFG.W / 2, H * 0.32);
     this.setFont(15, 600);
     ctx.fillStyle = 'rgba(255,255,255,.7)';
-    ctx.fillText('\u2190 \u2192 / A D · mouse · drag on touch', CFG.W / 2, 442);
+    ctx.fillText('\u2190 \u2192 / A D · mouse · drag on touch', CFG.W / 2, H * 0.615);
     this.setFont(13, 500);
     ctx.fillStyle = 'rgba(255,255,255,.5)';
-    ctx.fillText('grab power-ups:  bubble · rocket · clock · \u00d72', CFG.W / 2, 468);
+    ctx.fillText('grab power-ups:  bubble · rocket · clock · \u00d72', CFG.W / 2, H * 0.65);
     ctx.globalAlpha = 0.55 + 0.45 * Math.sin(t * 3);
     this.setFont(21, 800);
     ctx.fillStyle = '#ffe9a8';
-    ctx.fillText('TAP  or  SPACE  to start', CFG.W / 2, 505);
+    ctx.fillText('TAP  or  SPACE  to start', CFG.W / 2, H * 0.705);
     ctx.globalAlpha = 1;
     this.setFont(13, 500);
     ctx.fillStyle = 'rgba(255,255,255,.45)';
-    ctx.fillText('P pause · M sound', CFG.W / 2, 662);
+    ctx.fillText('P pause · M sound', CFG.W / 2, H * 0.92);
     ctx.restore();
   },
   dead() {
@@ -920,14 +932,15 @@ function frame(tMs) {
 
 Input.attach();
 Score.load();
+resize();
 BG.reset();
 Game.platforms.reset();
 Game.player.reset();
-resize();
 addEventListener('resize', resize);
 requestAnimationFrame(frame);
 
 if (typeof globalThis !== 'undefined') {
+  globalThis.__CFG__ = CFG;
   globalThis.__GAME__ = Game;
   globalThis.__SCORE__ = Score;
   globalThis.__PARTICLES__ = Particles;
