@@ -83,17 +83,103 @@ const SFX = {
     o.connect(g).connect(this.ctx.destination);
     o.start(t); o.stop(t + dur + 0.03);
   },
-  jump() { this.tone(300, 620, 0.13, 'triangle', 0.12); },
+  noise(dur, freq, vol, delay = 0) {
+    if (!this.on || !this.ctx) return;
+    if (!this._nb) {
+      const len = Math.floor(this.ctx.sampleRate * 0.5);
+      const buf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
+      const d = buf.getChannelData(0);
+      for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+      this._nb = buf;
+    }
+    const t = this.ctx.currentTime + delay;
+    const src = this.ctx.createBufferSource(); src.buffer = this._nb;
+    const f = this.ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = freq;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    src.connect(f).connect(g).connect(this.ctx.destination);
+    src.start(t); src.stop(t + dur + 0.02);
+  },
+  jump() { const d = rand(0.95, 1.05); this.tone(300 * d, 620 * d, 0.13, 'triangle', 0.11); },
   spring() { this.tone(180, 980, 0.28, 'triangle', 0.15); },
   land() { this.tone(150, 90, 0.07, 'sine', 0.1); },
+  crack() { this.noise(0.12, 500, 0.13); },
   crumble() { this.tone(175, 60, 0.13, 'sine', 0.18); this.tone(115, 42, 0.17, 'sine', 0.12, 0.06); },
-  die() { this.tone(420, 70, 0.5, 'triangle', 0.14); },
+  die() { this.tone(420, 70, 0.5, 'triangle', 0.14); this.noise(0.3, 300, 0.08, 0.05); },
   click() { this.tone(500, 720, 0.08, 'square', 0.07); },
   collectShield() { this.tone(320, 520, 0.09, 'sine', 0.13); this.tone(520, 940, 0.16, 'sine', 0.12, 0.07); },
   collectJet() { this.tone(140, 720, 0.3, 'triangle', 0.16); },
   collectSlow() { this.tone(620, 240, 0.32, 'sine', 0.13); },
   collectX2() { this.tone(660, 660, 0.07, 'square', 0.09); this.tone(880, 880, 0.12, 'square', 0.09, 0.07); },
-  shieldPop() { this.tone(420, 90, 0.24, 'triangle', 0.17); this.tone(760, 220, 0.2, 'sine', 0.11, 0.05); },
+  shieldPop() { this.tone(420, 90, 0.24, 'triangle', 0.17); this.noise(0.15, 900, 0.12); },
+  milestone() { this.tone(523, 523, 0.08, 'sine', 0.11); this.tone(659, 659, 0.08, 'sine', 0.11, 0.08); this.tone(784, 784, 0.16, 'sine', 0.12, 0.16); },
+  fanfare() { this.tone(523, 523, 0.09, 'square', 0.08); this.tone(659, 659, 0.09, 'square', 0.08, 0.1); this.tone(784, 784, 0.09, 'square', 0.08, 0.2); this.tone(1047, 1047, 0.28, 'square', 0.09, 0.3); },
+};
+
+/* ---------------- music (tiny procedural loop, no assets) ---------------- */
+const Music = {
+  ctx: null, started: false, playing: false,
+  step: 0, nextTime: 0, timer: null, droneGain: null, lastDrone: 0,
+  bass: [110, 92.5, 130.8, 98],
+  mel: [
+    440, 0, 554.4, 659.3, 739.99, 0, 659.3, 554.4,
+    493.88, 0, 440, 493.88, 554.4, 0, 493.88, 440,
+    659.3, 0, 739.99, 659.3, 554.4, 0, 493.88, 554.4,
+    659.3, 554.4, 493.88, 0, 369.99, 0, 0, 0,
+  ],
+  ensure() {
+    if (!SFX.ctx) SFX.ensure();
+    this.ctx = SFX.ctx;
+    if (!this.ctx || this.started) return;
+    this.started = true;
+    this.nextTime = this.ctx.currentTime + 0.05;
+    this.timer = setInterval(() => this.schedule(), 90);
+    const c = this.ctx;
+    this.droneGain = c.createGain();
+    this.droneGain.gain.value = 0;
+    this.droneGain.connect(c.destination);
+    for (const f of [55, 82.41]) {
+      const o = c.createOscillator();
+      o.type = 'sine'; o.frequency.value = f; o.detune.value = rand(-6, 6);
+      o.connect(this.droneGain); o.start();
+    }
+    const lfo = c.createOscillator(); lfo.frequency.value = 0.12;
+    const lg = c.createGain(); lg.gain.value = 0.012;
+    lfo.connect(lg).connect(this.droneGain.gain); lfo.start();
+    if (Game.state === 'playing' || Game.state === 'menu') this.playing = true;
+  },
+  setPlaying(on) { this.playing = on; },
+  update(time, altT) {
+    if (!this.ctx || !this.droneGain || time - this.lastDrone < 0.3) return;
+    this.lastDrone = time;
+    const target = altT > 0.5 && this.playing && SFX.on && !Game.paused ? 0.035 : 0;
+    this.droneGain.gain.setTargetAtTime(target, this.ctx.currentTime, 1.2);
+  },
+  schedule() {
+    if (!this.ctx) return;
+    const stepDur = 60 / 132 / 2;
+    while (this.nextTime < this.ctx.currentTime + 0.35) {
+      if (this.playing && SFX.on && !Game.paused) this.playStep(this.step, this.nextTime);
+      this.step = (this.step + 1) % 32;
+      this.nextTime += stepDur;
+    }
+  },
+  playStep(i, t) {
+    const c = this.ctx;
+    if (i % 2 === 0) this.note(this.bass[(i >> 3) % 4], t, 0.3, 'sine', 0.06);
+    const m = this.mel[i % 32];
+    if (m && Math.random() > 0.03) this.note(m * rand(0.99, 1.01), t, 0.2, 'triangle', 0.045);
+  },
+  note(f, t, dur, type, vol) {
+    const c = this.ctx;
+    const o = c.createOscillator(), g = c.createGain();
+    o.type = type; o.frequency.value = f;
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g).connect(c.destination);
+    o.start(t); o.stop(t + dur + 0.03);
+  },
 };
 
 /* ---------------- input (keyboard + pointer) ---------------- */
@@ -130,7 +216,7 @@ const Input = {
       const k = e.key;
       if (k === 'ArrowLeft' || k === 'a' || k === 'A') { this.keys.l = true; this.keyT.l = this.now(); }
       else if (k === 'ArrowRight' || k === 'd' || k === 'D') { this.keys.r = true; this.keyT.r = this.now(); }
-      else if (k === ' ' || k === 'Enter') { if (!e.repeat) { SFX.ensure(); Game.primaryAction(); } }
+      else if (k === ' ' || k === 'Enter') { if (!e.repeat) { SFX.ensure(); Music.ensure(); Game.primaryAction(); } }
       else if (k === 'p' || k === 'P') { Game.togglePause(); }
       else if (k === 'm' || k === 'M') { SFX.on = !SFX.on; }
       else return;
@@ -143,6 +229,7 @@ const Input = {
     });
     canvas.addEventListener('pointerdown', e => {
       SFX.ensure();
+      Music.ensure();
       const x = this.logicalX(e);
       if (e.pointerType === 'touch') {
         this.touch.down = true;
@@ -539,13 +626,15 @@ class Player {
           this.onPlat = p;
           if (p.type === PTYPES.crumble) { p.broken = true; p.breakT = 0.35; }
           const boosted = p.type === PTYPES.spring && p.springCD <= 0;
-          if (boosted) { p.springCD = 1.2; p.springT = 1; }
+          if (boosted) { p.springCD = 1.6; p.springT = 1; }
           this.jump(CFG.jumpVel * (boosted ? CFG.springMul : 1));
           if (boosted) {
             Particles.burst(this.x, this.y + this.hh, { n: 14, angle: Math.PI / 2, spread: 1.6, speed: 150, g: 600, life: 0.5, size: 3, color: choice(PAL.spring) });
             SFX.spring();
           } else {
             Particles.burst(this.x, this.y + this.hh, { n: 8, angle: Math.PI / 2, spread: 2.4, speed: 90, g: 700, life: 0.45, size: 2.5, color: '#ffffff' });
+            SFX.land();
+            if (p.type === PTYPES.crumble) SFX.crack();
             SFX.jump();
           }
           break;
@@ -638,16 +727,18 @@ const Camera = {
 
 /* ---------------- score ---------------- */
 const Score = {
-  meters: 0, points: 0, best: 0, startY: 0, lastReal: 0, newBest: false,
+  meters: 0, points: 0, best: 0, startY: 0, newBest: false,
   load() { try { this.best = +localStorage.getItem('skyhop.best') || 0; } catch (e) { this.best = 0; } },
   save() { try { localStorage.setItem('skyhop.best', String(this.best)); } catch (e) { } },
-  reset(py) { this.meters = 0; this.points = 0; this.lastReal = 0; this.newBest = false; this.startY = py; },
+  reset(py) { this.meters = 0; this.points = 0; this.newBest = false; this.startY = py; },
   update(py) {
     const real = Math.max(0, (this.startY - py) / CFG.pxPerM);
-    if (real > this.meters) this.meters = real;
-    const gain = real - this.lastReal;
-    if (gain > 0) this.points += gain * (FX.x2 > 0 ? 2 : 1);
-    this.lastReal = real;
+    if (real > this.meters) {
+      const crossed = Math.floor(real / 100) > Math.floor(this.meters / 100);
+      this.points += (real - this.meters) * (FX.x2 > 0 ? 2 : 1);
+      this.meters = real;
+      if (crossed && this.meters >= 100) SFX.milestone();
+    }
     if (Math.floor(this.points) > this.best) { this.best = Math.floor(this.points); this.newBest = true; }
   },
 };
@@ -817,13 +908,16 @@ const Game = {
     this.state = 'playing';
     this.player.jump(CFG.jumpVel);
     SFX.jump();
+    Music.setPlaying(true);
   },
   die() {
     if (this.state !== 'playing') return;
     this.state = 'dead';
     this.player.die();
+    Music.setPlaying(false);
     this.shake = 1;
     Score.save();
+    if (Score.newBest) SFX.fanfare();
   },
   primaryAction() {
     if (this.state === 'menu') { SFX.click(); this.start(); }
@@ -848,6 +942,7 @@ const Game = {
       this.platforms.ensure(Camera.y);
       Items.prune(Camera.y);
       Score.update(p.y);
+      Music.update(this.time, clamp01(Score.meters / 600));
       for (const it of Items.list) {
         if (it.taken) continue;
         if (Math.abs(p.x - it.x) < p.hw + 11 && Math.abs(p.y - it.y) < p.hh + 11) {
@@ -948,4 +1043,7 @@ if (typeof globalThis !== 'undefined') {
   globalThis.__ITEMS__ = Items;
   globalThis.__ITEM__ = Item;
   globalThis.__CAMERA__ = Camera;
+  globalThis.__PLATFORM__ = Platform;
+  globalThis.__PTYPES__ = PTYPES;
+  globalThis.__MUSIC__ = Music;
 }
