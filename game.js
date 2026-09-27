@@ -83,7 +83,7 @@ const SFX = {
     o.connect(g).connect(this.ctx.destination);
     o.start(t); o.stop(t + dur + 0.03);
   },
-  noise(dur, freq, vol, delay = 0) {
+  noise(dur, freq, vol, delay = 0, freqEnd = null) {
     if (!this.on || !this.ctx) return;
     if (!this._nb) {
       const len = Math.floor(this.ctx.sampleRate * 0.5);
@@ -94,12 +94,23 @@ const SFX = {
     }
     const t = this.ctx.currentTime + delay;
     const src = this.ctx.createBufferSource(); src.buffer = this._nb;
-    const f = this.ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = freq;
+    const f = this.ctx.createBiquadFilter();
+    f.type = 'lowpass';
+    f.frequency.setValueAtTime(Math.max(1, freq), t);
+    if (freqEnd) f.frequency.exponentialRampToValueAtTime(Math.max(1, freqEnd), t + dur);
     const g = this.ctx.createGain();
     g.gain.setValueAtTime(vol, t);
     g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
     src.connect(f).connect(g).connect(this.ctx.destination);
     src.start(t); src.stop(t + dur + 0.02);
+  },
+  whoosh(delay = 0) { this.noise(0.55, 2400, 0.09, delay, 250); },
+  boom() {
+    this.tone(75, 26, 0.5, 'sine', 0.45);
+    this.noise(0.5, 800, 0.35, 0.02, 150);
+    this.noise(0.3, 2800, 0.14, 0.12);
+    this.noise(0.25, 3800, 0.1, 0.24);
+    this.noise(0.2, 4800, 0.07, 0.36);
   },
   jump() { const d = rand(0.95, 1.05); this.tone(300 * d, 620 * d, 0.13, 'triangle', 0.11); },
   spring() { this.tone(180, 980, 0.28, 'triangle', 0.15); },
@@ -400,47 +411,61 @@ const Items = {
 /* ---------------- fireworks (100-point celebration) ---------------- */
 const FW_COLORS = ['#ff6b6b', '#ffd166', '#6fc7ff', '#8ee08e', '#c792ea', '#ff9ee5', '#ffffff'];
 const Fireworks = {
-  rockets: [], sparks: [], rings: [],
-  reset() { this.rockets.length = 0; this.sparks.length = 0; this.rings.length = 0; },
-  launch(n = 1) {
+  rockets: [], sparks: [], rings: [], flash: null,
+  reset() { this.rockets.length = 0; this.sparks.length = 0; this.rings.length = 0; this.flash = null; },
+  launch(n = 3) {
     for (let i = 0; i < n; i++) {
-      if (this.rockets.length >= 5) break;
+      if (this.rockets.length >= 8) break;
       const startY = CFG.H + 12;
-      const targetY = rand(CFG.H * 0.12, CFG.H * 0.42);
+      const targetY = rand(CFG.H * 0.1, CFG.H * 0.4);
       this.rockets.push({
-        x: rand(CFG.W * 0.15, CFG.W * 0.85),
+        x: rand(CFG.W * 0.12, CFG.W * 0.88),
         y: startY,
         vy: -Math.sqrt(2 * 300 * (startY - targetY)) * rand(1.02, 1.1),
         targetY,
         color: choice(FW_COLORS),
+        delay: i * 0.3,
       });
+      SFX.whoosh(i * 0.3);
     }
   },
   addSpark(x, y, vx, vy, life, size, color) {
-    if (this.sparks.length >= 220) this.sparks.shift();
+    if (this.sparks.length >= 340) this.sparks.shift();
     this.sparks.push({ x, y, vx, vy, age: 0, life, size, color, tw: rand(0, 6) });
   },
   burst(r) {
-    this.rings.push({ x: r.x, y: r.y, age: 0, life: 0.35, color: r.color });
-    const n = 26 + ((Math.random() * 14) | 0);
+    this.rings.push({ x: r.x, y: r.y, age: 0, life: 0.55, color: r.color });
+    this.flash = { age: 0, life: 0.22, color: r.color };
+    Game.shake = Math.max(Game.shake, 0.6);
+    SFX.boom();
+    const n = 46 + ((Math.random() * 24) | 0);
     for (let i = 0; i < n; i++) {
-      const a = (i / n) * Math.PI * 2 + rand(-0.08, 0.08);
-      const v = rand(70, 200);
-      this.addSpark(r.x, r.y, Math.cos(a) * v, Math.sin(a) * v, rand(0.6, 1.15), rand(1.5, 3.2), choice(FW_COLORS));
+      const a = (i / n) * Math.PI * 2 + rand(-0.06, 0.06);
+      const v = rand(110, 340);
+      this.addSpark(r.x, r.y, Math.cos(a) * v, Math.sin(a) * v, rand(0.8, 1.6), rand(2, 4.5), choice(FW_COLORS));
     }
   },
   update(dt) {
     for (let i = this.rockets.length - 1; i >= 0; i--) {
       const r = this.rockets[i];
+      if (r.delay > 0) { r.delay -= dt; continue; }
       r.vy += 300 * dt;
       r.y += r.vy * dt;
-      if (Math.random() < 0.8) this.addSpark(r.x + rand(-2, 2), r.y + 4, rand(-15, 15), rand(20, 60), 0.3, 1.5, '#ffd9a0');
+      if (Math.random() < 0.9) this.addSpark(r.x + rand(-2, 2), r.y + 5, rand(-18, 18), rand(30, 70), 0.35, rand(1.5, 2.5), '#ffd9a0');
       if (r.y <= r.targetY) { this.burst(r); this.rockets.splice(i, 1); }
     }
     for (let i = this.sparks.length - 1; i >= 0; i--) {
       const s = this.sparks[i];
       s.age += dt;
-      if (s.age >= s.life) { this.sparks.splice(i, 1); continue; }
+      if (s.age >= s.life) {
+        if (Math.random() < 0.22 && s.size > 1.8) {
+          for (let k = 0; k < 2; k++) {
+            const a = rand(0, 6.28);
+            this.addSpark(s.x, s.y, Math.cos(a) * rand(20, 60), Math.sin(a) * rand(20, 60), 0.22, 1.2, s.color);
+          }
+        }
+        this.sparks.splice(i, 1); continue;
+      }
       s.vy += 240 * dt;
       const d = Math.exp(-1.8 * dt);
       s.vx *= d; s.vy *= d;
@@ -451,21 +476,31 @@ const Fireworks = {
       rg.age += dt;
       if (rg.age >= rg.life) this.rings.splice(i, 1);
     }
+    if (this.flash) {
+      this.flash.age += dt;
+      if (this.flash.age >= this.flash.life) this.flash = null;
+    }
   },
   draw() {
     ctx.save();
+    if (this.flash) {
+      ctx.globalAlpha = (1 - this.flash.age / this.flash.life) * 0.2;
+      ctx.fillStyle = this.flash.color;
+      ctx.fillRect(0, 0, CFG.W, CFG.H);
+    }
     for (const rg of this.rings) {
       const f = rg.age / rg.life;
       ctx.globalAlpha = (1 - f) * 0.8;
-      ctx.strokeStyle = rg.color; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.arc(rg.x, rg.y, 6 + f * 30, 0, 7); ctx.stroke();
+      ctx.strokeStyle = rg.color; ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.arc(rg.x, rg.y, 8 + f * 100, 0, 7); ctx.stroke();
     }
     for (const r of this.rockets) {
-      ctx.globalAlpha = 0.35;
+      if (r.delay > 0) continue;
+      ctx.globalAlpha = 0.4;
       ctx.fillStyle = r.color;
-      ctx.beginPath(); ctx.arc(r.x, r.y, 6, 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.arc(r.x, r.y, 9, 0, 7); ctx.fill();
       ctx.globalAlpha = 1;
-      ctx.beginPath(); ctx.arc(r.x, r.y, 2.5, 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.arc(r.x, r.y, 3.5, 0, 7); ctx.fill();
     }
     for (const s of this.sparks) {
       const f = 1 - s.age / s.life;
@@ -823,7 +858,7 @@ const Score = {
     if (m100 > this.lastMilestone) {
       this.lastMilestone = m100;
       SFX.milestone();
-      Fireworks.launch(1);
+      Fireworks.launch(3);
     }
     if (Math.floor(this.points) > this.best) { this.best = Math.floor(this.points); this.newBest = true; }
   },
@@ -1080,7 +1115,7 @@ const Game = {
     ctx.fillStyle = '#0e1526';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     let ox = 0, oy = 0;
-    if (this.shake > 0) { ox = rand(-4, 4) * this.shake; oy = rand(-4, 4) * this.shake; }
+    if (this.shake > 0) { ox = rand(-6, 6) * this.shake; oy = rand(-6, 6) * this.shake; }
     ctx.setTransform(viewScale, 0, 0, viewScale, viewOX + ox * viewScale, viewOY + oy * viewScale);
     BG.draw(Camera.y, Score.meters, this.time);
     ctx.save();
