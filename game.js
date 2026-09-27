@@ -61,9 +61,9 @@ const SFX = {
     if (!this.ctx) { try { this.ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { this.ctx = null; } }
     if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume();
   },
-  tone(f0, f1, dur, type, vol) {
+  tone(f0, f1, dur, type, vol, delay = 0) {
     if (!this.on || !this.ctx) return;
-    const t = this.ctx.currentTime;
+    const t = this.ctx.currentTime + delay;
     const o = this.ctx.createOscillator(), g = this.ctx.createGain();
     o.type = type;
     o.frequency.setValueAtTime(Math.max(1, f0), t);
@@ -73,12 +73,17 @@ const SFX = {
     o.connect(g).connect(this.ctx.destination);
     o.start(t); o.stop(t + dur + 0.03);
   },
-  jump() { this.tone(300, 620, 0.14, 'square', 0.09); },
+  jump() { this.tone(300, 620, 0.13, 'triangle', 0.12); },
   spring() { this.tone(180, 980, 0.28, 'triangle', 0.15); },
   land() { this.tone(150, 90, 0.07, 'sine', 0.1); },
-  crumble() { this.tone(220, 60, 0.18, 'sawtooth', 0.07); },
-  die() { this.tone(420, 70, 0.5, 'sawtooth', 0.13); },
+  crumble() { this.tone(175, 60, 0.13, 'sine', 0.18); this.tone(115, 42, 0.17, 'sine', 0.12, 0.06); },
+  die() { this.tone(420, 70, 0.5, 'triangle', 0.14); },
   click() { this.tone(500, 720, 0.08, 'square', 0.07); },
+  collectShield() { this.tone(320, 520, 0.09, 'sine', 0.13); this.tone(520, 940, 0.16, 'sine', 0.12, 0.07); },
+  collectJet() { this.tone(140, 720, 0.3, 'triangle', 0.16); },
+  collectSlow() { this.tone(620, 240, 0.32, 'sine', 0.13); },
+  collectX2() { this.tone(660, 660, 0.07, 'square', 0.09); this.tone(880, 880, 0.12, 'square', 0.09, 0.07); },
+  shieldPop() { this.tone(420, 90, 0.24, 'triangle', 0.17); this.tone(760, 220, 0.2, 'sine', 0.11, 0.05); },
 };
 
 /* ---------------- input (keyboard + pointer) ---------------- */
@@ -216,6 +221,85 @@ const Particles = {
   },
 };
 
+/* ---------------- active effects (power-up timers) ---------------- */
+const FX = {
+  shield: false, jet: 0, slow: 0, x2: 0,
+  MAX: { jet: 2.6, slow: 6, x2: 10 },
+  clear() { this.shield = false; this.jet = 0; this.slow = 0; this.x2 = 0; },
+  tick(dt) {
+    if (this.jet > 0) this.jet = Math.max(0, this.jet - dt);
+    if (this.slow > 0) this.slow = Math.max(0, this.slow - dt);
+    if (this.x2 > 0) this.x2 = Math.max(0, this.x2 - dt);
+  },
+};
+
+/* ---------------- items (power-ups) ---------------- */
+const ITEM_TYPES = ['shield', 'jet', 'slow', 'x2'];
+const ITEM_COLORS = { shield: '#6fc7ff', jet: '#ff9e5e', slow: '#9b6fff', x2: '#ffd166' };
+class Item {
+  constructor(x, y, type) {
+    this.x = x; this.y = y; this.type = type;
+    this.t = rand(0, 6.28);
+    this.taken = false;
+  }
+  update(dt) { this.t += dt * 3; }
+  draw() {
+    if (this.taken) return;
+    const y = this.y + Math.sin(this.t) * 4;
+    ctx.save();
+    ctx.globalAlpha = 0.3 + 0.2 * Math.sin(this.t * 2);
+    ctx.fillStyle = ITEM_COLORS[this.type];
+    ctx.beginPath(); ctx.arc(this.x, y, 15, 0, 7); ctx.fill();
+    ctx.restore();
+    if (this.type === 'shield') {
+      ctx.fillStyle = '#6fc7ff'; ctx.beginPath(); ctx.arc(this.x, y, 8, 0, 7); ctx.fill();
+      ctx.strokeStyle = '#cfeeff'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(this.x, y, 8, 0, 7); ctx.stroke();
+      ctx.strokeStyle = 'rgba(255,255,255,.9)'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(this.x - 2, y - 2, 4, -2.2, -0.8); ctx.stroke();
+    } else if (this.type === 'jet') {
+      ctx.fillStyle = '#ff6b4a'; rr(ctx, this.x - 5, y - 8, 10, 16, 4); ctx.fill();
+      ctx.fillStyle = '#ffd166';
+      ctx.beginPath(); ctx.moveTo(this.x - 5, y + 4); ctx.lineTo(this.x - 9, y + 9); ctx.lineTo(this.x - 5, y + 8); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(this.x + 5, y + 4); ctx.lineTo(this.x + 9, y + 9); ctx.lineTo(this.x + 5, y + 8); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#8ecdf5'; ctx.beginPath(); ctx.arc(this.x, y - 2, 2.5, 0, 7); ctx.fill();
+    } else if (this.type === 'slow') {
+      ctx.fillStyle = '#9b6fff'; ctx.beginPath(); ctx.arc(this.x, y, 8, 0, 7); ctx.fill();
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.arc(this.x, y, 8, 0, 7); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(this.x, y); ctx.lineTo(this.x, y - 4);
+      ctx.moveTo(this.x, y); ctx.lineTo(this.x + 3, y + 1); ctx.stroke();
+    } else {
+      ctx.fillStyle = '#ffd166'; rr(ctx, this.x - 9, y - 9, 18, 18, 5); ctx.fill();
+      ctx.fillStyle = '#5a3d00'; ctx.font = '800 11px sans-serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('\u00d72', this.x, y + 1);
+      ctx.textBaseline = 'alphabetic';
+    }
+  }
+}
+const Items = {
+  list: [],
+  reset() { this.list.length = 0; },
+  spawnFrom(pl) {
+    if (this.list.length > 30) return;
+    const d = clamp01(Score.meters / 450);
+    if (Math.random() > 0.05 + 0.05 * d) return;
+    const r = Math.random();
+    const type = r < 0.3 ? 'shield' : r < 0.55 ? 'jet' : r < 0.8 ? 'slow' : 'x2';
+    const x = clamp(pl.x + rand(-18, 18), 16, CFG.W - 16);
+    this.list.push(new Item(x, pl.y - 30, type));
+  },
+  prune(camY) {
+    for (let i = this.list.length - 1; i >= 0; i--) {
+      const it = this.list[i];
+      if (it.taken || it.y > camY + CFG.H + 80 || it.y < camY - 80) this.list.splice(i, 1);
+    }
+  },
+  update(dt) { for (const it of this.list) it.update(dt); },
+  draw() { for (const it of this.list) it.draw(); },
+};
+
 /* ---------------- background (parallax sky) ---------------- */
 const SKY = {
   top: [[105, 183, 255], [74, 95, 174], [20, 16, 50]],
@@ -311,7 +395,7 @@ class Platform {
     const ox = this.broken ? rand(-2.5, 2.5) : 0;
     const x = this.x0 + ox, y = this.y, w = this.w, h = this.h;
     let body = '#58c14e', top = '#83dd70';
-    if (this.type === PTYPES.move) { body = '#4f9fe0'; top = '#8ecdf5'; }
+    if (this.type === PTYPES.move) { body = FX.slow > 0 ? '#7a6fd0' : '#4f9fe0'; top = FX.slow > 0 ? '#a89cf0' : '#8ecdf5'; }
     else if (this.type === PTYPES.crumble) { body = this.broken ? '#9a6a3d' : '#d99a55'; top = this.broken ? '#b07c48' : '#eec27f'; }
     ctx.fillStyle = body; rr(ctx, x, y, w, h, 6); ctx.fill();
     ctx.fillStyle = top; rr(ctx, x + 2.5, y + 2, w - 5, 5, 2.5); ctx.fill();
@@ -378,6 +462,7 @@ class Platforms {
     if (type === PTYPES.move) p.setRange(30 + 95 * d);
     this.list.push(p);
     this.last = p;
+    Items.spawnFrom(p);
   }
   ensure(camY) {
     let guard = 0;
@@ -408,6 +493,7 @@ class Player {
     this.dead = false;
     this.spin = 0;
     this.onPlat = null;
+    this.rescueGrace = 0;
   }
   get hw() { return CFG.playerW / 2; }
   get hh() { return CFG.playerH / 2; }
@@ -422,7 +508,12 @@ class Player {
     if (this.x < this.hw) { this.x = this.hw; if (this.vx < 0) this.vx = 0; }
     if (this.x > CFG.W - this.hw) { this.x = CFG.W - this.hw; if (this.vx > 0) this.vx = 0; }
     const prevBottom = this.y + this.hh;
-    this.vy = Math.min(1400, this.vy + CFG.gravity * dt);
+    if (FX.jet > 0) {
+      this.vy = -CFG.jumpVel * 1.4;
+      if (Math.random() < 0.6) Particles.burst(this.x, this.y + this.hh, { n: 1, angle: Math.PI / 2, spread: 1.2, speed: 70, g: 60, life: 0.25, size: 3, color: choice(['#ffd166', '#ff9e5e', '#ffffff']) });
+    } else {
+      this.vy = Math.min(1400, this.vy + CFG.gravity * dt);
+    }
     this.y += this.vy * dt;
     this.minY = Math.min(this.minY, this.y);
     this.squash = lerp(this.squash, 1, Math.min(1, dt * 9));
@@ -461,9 +552,17 @@ class Player {
   }
   draw() {
     const s = clamp(this.squash, 0.45, 1.6);
+    const jet = FX.jet > 0;
     ctx.save();
     ctx.translate(this.x, this.y);
-    ctx.rotate(this.dead ? this.spin : clamp(this.vx / CFG.maxVX, -1, 1) * 0.18);
+    ctx.rotate(this.dead ? this.spin : clamp(this.vx / CFG.maxVX, -1, 1) * (jet ? 0.1 : 0.18));
+    if (jet) {
+      const fl = 10 + rand(0, 9);
+      ctx.fillStyle = 'rgba(255,158,94,.85)';
+      ctx.beginPath(); ctx.moveTo(-6, 11); ctx.lineTo(0, 11 + fl); ctx.lineTo(6, 11); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = 'rgba(255,225,130,.9)';
+      ctx.beginPath(); ctx.moveTo(-3, 11); ctx.lineTo(0, 11 + fl * 0.6); ctx.lineTo(3, 11); ctx.closePath(); ctx.fill();
+    }
     ctx.scale(2 - s, s);
     const w = CFG.playerW, h = CFG.playerH;
     ctx.lineCap = 'round';
@@ -504,6 +603,13 @@ class Player {
     if (this.dead) ctx.arc(0, 5, 2.5, Math.PI * 1.1, Math.PI * 1.9);
     else ctx.arc(0, 3.5, 3.2, Math.PI * 0.15, Math.PI * 0.85);
     ctx.stroke();
+    if (FX.shield && !this.dead) {
+      const r = 27 + Math.sin(Game.time * 5) * 2;
+      ctx.fillStyle = 'rgba(111,199,255,.16)';
+      ctx.beginPath(); ctx.arc(0, 0, r, 0, 7); ctx.fill();
+      ctx.strokeStyle = 'rgba(111,199,255,.8)'; ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.arc(0, 0, r, 0, 7); ctx.stroke();
+    }
     ctx.restore();
   }
 }
@@ -521,14 +627,17 @@ const Camera = {
 
 /* ---------------- score ---------------- */
 const Score = {
-  meters: 0, best: 0, startY: 0, newBest: false,
+  meters: 0, points: 0, best: 0, startY: 0, lastReal: 0, newBest: false,
   load() { try { this.best = +localStorage.getItem('skyhop.best') || 0; } catch (e) { this.best = 0; } },
   save() { try { localStorage.setItem('skyhop.best', String(this.best)); } catch (e) { } },
-  reset(py) { this.meters = 0; this.newBest = false; this.startY = py; },
+  reset(py) { this.meters = 0; this.points = 0; this.lastReal = 0; this.newBest = false; this.startY = py; },
   update(py) {
-    const m = Math.max(0, Math.floor((this.startY - py) / CFG.pxPerM));
-    if (m > this.meters) this.meters = m;
-    if (this.meters > this.best) { this.best = this.meters; this.newBest = true; }
+    const real = Math.max(0, (this.startY - py) / CFG.pxPerM);
+    if (real > this.meters) this.meters = real;
+    const gain = real - this.lastReal;
+    if (gain > 0) this.points += gain * (FX.x2 > 0 ? 2 : 1);
+    this.lastReal = real;
+    if (Math.floor(this.points) > this.best) { this.best = Math.floor(this.points); this.newBest = true; }
   },
 };
 
@@ -539,21 +648,51 @@ const UI = {
   setFont(size, weight) { ctx.font = `${weight || 700} ${size}px ${FONT}`; },
   hud() {
     if (Game.state === 'menu') return;
+    const pts = Math.floor(Score.points);
+    const suffix = FX.x2 > 0 ? ' pts' : ' m';
     ctx.save();
     ctx.textAlign = 'center'; ctx.textBaseline = 'top';
     this.setFont(30, 800);
     ctx.fillStyle = 'rgba(0,0,0,.28)';
-    ctx.fillText(`${Score.meters} m`, CFG.W / 2 + 2, 16);
-    ctx.fillStyle = '#fff';
-    ctx.fillText(`${Score.meters} m`, CFG.W / 2, 14);
+    ctx.fillText(`${pts}${suffix}`, CFG.W / 2 + 2, 16);
+    ctx.fillStyle = FX.x2 > 0 ? '#ffd166' : '#fff';
+    ctx.fillText(`${pts}${suffix}`, CFG.W / 2, 14);
     this.setFont(15, 700);
     ctx.fillStyle = 'rgba(255,255,255,.75)';
-    ctx.fillText(`BEST ${Math.max(Score.best, Score.meters)} m`, CFG.W / 2, 54);
+    ctx.fillText(`BEST ${Math.max(Score.best, pts)}${suffix}`, CFG.W / 2, 54);
     if (!SFX.on) {
       this.setFont(12, 600);
       ctx.fillStyle = 'rgba(255,255,255,.4)';
       ctx.fillText('muted (M)', CFG.W / 2, 78);
     }
+    let bx = 10;
+    const badge = (frac, color, glyph) => {
+      rr(ctx, bx, 88, 34, 22, 7);
+      ctx.fillStyle = color; ctx.fill();
+      ctx.fillStyle = '#fff';
+      if (glyph === '2x') {
+        this.setFont(11, 800);
+        ctx.fillText('\u00d72', bx + 17, 94);
+      } else if (glyph === 'shield') {
+        ctx.beginPath(); ctx.arc(bx + 17, 98, 5, 0, 7); ctx.fill();
+      } else if (glyph === 'jet') {
+        ctx.beginPath(); ctx.moveTo(bx + 12, 103); ctx.lineTo(bx + 17, 92); ctx.lineTo(bx + 22, 103); ctx.closePath(); ctx.fill();
+      } else {
+        ctx.lineWidth = 2; ctx.strokeStyle = '#fff';
+        ctx.beginPath(); ctx.arc(bx + 17, 98, 5.5, 0, 7); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(bx + 17, 98); ctx.lineTo(bx + 17, 94.5);
+        ctx.moveTo(bx + 17, 98); ctx.lineTo(bx + 20, 99); ctx.stroke();
+      }
+      if (frac < 1) {
+        ctx.fillStyle = 'rgba(0,0,0,.35)'; ctx.fillRect(bx + 3, 105, 28, 3);
+        ctx.fillStyle = '#fff'; ctx.fillRect(bx + 3, 105, 28 * clamp01(frac), 3);
+      }
+      bx += 42;
+    };
+    if (FX.jet > 0) badge(FX.jet / FX.MAX.jet, '#ff9e5e', 'jet');
+    if (FX.slow > 0) badge(FX.slow / FX.MAX.slow, '#9b6fff', 'slow');
+    if (FX.x2 > 0) badge(FX.x2 / FX.MAX.x2, '#ffd166', '2x');
+    if (FX.shield) badge(1, '#6fc7ff', 'shield');
     ctx.restore();
   },
   menu(t) {
@@ -575,7 +714,10 @@ const UI = {
     ctx.fillText('hop forever · climb the sky', CFG.W / 2, 232);
     this.setFont(15, 600);
     ctx.fillStyle = 'rgba(255,255,255,.7)';
-    ctx.fillText('\u2190 \u2192 / A D · mouse · drag on touch', CFG.W / 2, 458);
+    ctx.fillText('\u2190 \u2192 / A D · mouse · drag on touch', CFG.W / 2, 442);
+    this.setFont(13, 500);
+    ctx.fillStyle = 'rgba(255,255,255,.5)';
+    ctx.fillText('grab power-ups:  bubble · rocket · clock · \u00d72', CFG.W / 2, 468);
     ctx.globalAlpha = 0.55 + 0.45 * Math.sin(t * 3);
     this.setFont(21, 800);
     ctx.fillStyle = '#ffe9a8';
@@ -601,10 +743,13 @@ const UI = {
     ctx.fillText('OUCH!', CFG.W / 2, y + 66);
     this.setFont(36, 800);
     ctx.fillStyle = '#fff';
-    ctx.fillText(`${Score.meters} m`, CFG.W / 2, y + 122);
-    this.setFont(16, 600);
+    ctx.fillText(`${Math.floor(Score.points)}`, CFG.W / 2, y + 112);
+    this.setFont(13, 700);
+    ctx.fillStyle = 'rgba(255,255,255,.55)';
+    ctx.fillText('SCORE', CFG.W / 2, y + 136);
+    this.setFont(15, 600);
     ctx.fillStyle = 'rgba(255,255,255,.7)';
-    ctx.fillText(`best  ${Score.best} m`, CFG.W / 2, y + 154);
+    ctx.fillText(`best ${Score.best}  ·  height ${Math.floor(Score.meters)} m`, CFG.W / 2, y + 158);
     if (Score.newBest) {
       this.setFont(18, 800);
       ctx.fillStyle = '#ffd166';
@@ -652,6 +797,8 @@ const Game = {
     Particles.list.length = 0;
     Camera.reset();
     Score.reset(this.player.y);
+    FX.clear();
+    Items.reset();
     this.shake = 0;
     this.paused = false;
     UI.btn = null;
@@ -681,12 +828,39 @@ const Game = {
     Particles.update(dt);
     const p = this.player;
     if (this.state === 'playing') {
+      FX.tick(dt);
       p.update(dt, this.platforms);
       this.platforms.update(dt);
+      Items.update(dt);
       Camera.update(dt, p.y);
       this.platforms.ensure(Camera.y);
+      Items.prune(Camera.y);
       Score.update(p.y);
-      if (p.y - p.hh > Camera.y + CFG.H) this.die();
+      for (const it of Items.list) {
+        if (it.taken) continue;
+        if (Math.abs(p.x - it.x) < p.hw + 11 && Math.abs(p.y - it.y) < p.hh + 11) {
+          it.taken = true;
+          Particles.burst(it.x, it.y, { n: 12, angle: 0, spread: 6.28, speed: 130, g: 150, life: 0.5, size: 3, color: ITEM_COLORS[it.type] });
+          if (it.type === 'shield') { FX.shield = true; SFX.collectShield(); }
+          else if (it.type === 'jet') { FX.jet = FX.MAX.jet; SFX.collectJet(); }
+          else if (it.type === 'slow') { FX.slow = FX.MAX.slow; SFX.collectSlow(); }
+          else { FX.x2 = FX.MAX.x2; SFX.collectX2(); }
+        }
+      }
+      if (p.rescueGrace > 0) p.rescueGrace -= dt;
+      if (p.y - p.hh > Camera.y + CFG.H) {
+        if (p.rescueGrace > 0) {
+          // shield just rescued, rising back into view
+        } else if (FX.shield) {
+          FX.shield = false;
+          p.rescueGrace = 2.0;
+          FX.jet = Math.max(FX.jet, 1.8);
+          p.vy = -CFG.jumpVel * 1.4;
+          this.shake = 1;
+          SFX.shieldPop();
+          Particles.burst(p.x, p.y, { n: 18, angle: 0, spread: 6.28, speed: 160, g: 300, life: 0.6, size: 3, color: '#6fc7ff' });
+        } else this.die();
+      }
     } else if (this.state === 'menu') {
       p.blink -= dt;
       if (p.blink < -0.12) p.blink = rand(1.5, 4.5);
@@ -717,6 +891,7 @@ const Game = {
     ctx.save();
     ctx.translate(0, -Camera.y);
     this.platforms.draw();
+    Items.draw();
     this.player.draw();
     ctx.restore();
     Particles.draw(Camera.y);
@@ -756,4 +931,8 @@ if (typeof globalThis !== 'undefined') {
   globalThis.__GAME__ = Game;
   globalThis.__SCORE__ = Score;
   globalThis.__PARTICLES__ = Particles;
+  globalThis.__FX__ = FX;
+  globalThis.__ITEMS__ = Items;
+  globalThis.__ITEM__ = Item;
+  globalThis.__CAMERA__ = Camera;
 }
